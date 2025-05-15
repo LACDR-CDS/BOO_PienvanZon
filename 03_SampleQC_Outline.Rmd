@@ -1,0 +1,346 @@
+---
+title: "BOO 2025 - Example Analysis"
+subtitle: "Script 3: Sample QC - Questions"
+date: "`r Sys.Date()`" 
+author: 
+  Student name
+output:
+  html_document:
+    code_download: true
+    theme: united
+    highlight: tango
+    df_print: paged
+    toc: true
+    number_sections: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+***
+
+> In this script, you will perform sample-level quality control (QC), removing any poor quality samples and ensuring that experimental replicates are comparable to one another. 
+
+***
+
+# Setup
+
+## Clean
+
+As before, we perform several setup steps at the start of the script to ensure our work is reproducible and clear. 
+
+**Exercise 1: Download the R markdown template and clean your environment:**
+
+```{r clean}
+#
+ls()
+
+```
+
+***
+
+## Set variables
+
+**Exercise 2: Create the following objects in your R environment:**
+
+* `root_dir` - project folder
+* `count_path` - location of the `countData` object within the project folder
+* `cpm_path` - location of the `cpmData` object
+* `metadata_path` - location of the `metaData` object
+
+* `count_store` - location to save the `countData` object within the project folder
+* `cpm_store` - location to save the `cpmData` object
+* `metadata_store` - location to save the filtered `metaData` after QC
+
+* `count_threshold` - minimum library size required for samples (600,000; 20% of the target sequencing depth)
+* `corr_threshold` - required correlation between replicates (0.9)
+
+```{r set-variables}
+#This is where the data comes from, thus the input folder
+root_dir <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/"
+count_path <- file.path(root_dir, "input", "countData.txt")
+metadata_path <- file.path(root_dir, "input", "metaData.txt")
+cmp_path <- file.path(root_dir, "output")
+
+#This is were I want to store my output, thus in the output folder
+count_store <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/output/"
+cpm_store <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/output/"
+metadata_store <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/output/"
+count_threshold <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/output/"
+corr_threshold <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/output/"
+
+```
+
+***
+
+## Packages
+
+Here, we load `tidyverse` and also a new package:
+
+* `ggrepel` allows us labels in plots to "repel" each other and make visualizations clearer
+
+**Exercise 3: Load `tidyverse` and `ggrepel` into your environment:**
+
+```{r load-packages, warning=F, message=F}
+#
+library(tidyverse)
+library(ggrepel)
+
+```
+
+***
+
+## Load data
+
+**Exercise 4: Load the count data, CPM data, and metadata into your environment:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  Make sure these are the ones your saved at the end of the probe QC.
+
+</details>
+
+```{r load-data, warning=FALSE, message=FALSE}
+#
+countData <- read.csv(count_path)
+metaData <- read.csv(metadata_path)
+CMPData <- read.csv(cmp_path)
+
+```
+
+***
+
+# Library size
+
+## Check
+
+Before applying any filters, it is good to perform some checks.
+
+**Exercise 5: Check that the column names of `countData` match the `sample_ID` order in `metaData`:**
+
+```{r}
+
+library(tibble)
+countData <- column_to_rownames(countData, var = "Probe_ID")
+```
+
+
+```{r order-check}
+# looking at the columns of countData and the sample ID's. Do they match? They don't match because probe is also a colunm, it had to be transformed to a rowname (above, but error)???
+head(colnames(countData))
+head(metaData$sample_ID)
+
+#Check if the order matches. True, it matches!
+all(colnames(countData) == metaData$sample_ID)
+
+```
+
+***
+
+## Calculate
+
+**Exercise 6: Now that we have removed unreliable and lowly expressed probes from `countData`, recalculate and save a new `lib_size` in the metadata:**
+
+```{r calculate-lib}
+#
+
+```
+
+***
+
+## Distribution
+
+**Exercise 7: Make a histogram of `lib_size`. What range of values does this variable take and is this reasonable for a TempO-Seq experiment?**
+
+```{r lib-histogram}
+#
+
+```
+
+***
+
+## Flag
+
+Samples whose library size is below 20% of the targeted sequencing depth (`corr_threshold`; 600,000) should be flagged as having low reads.
+
+**Exercise 8: Create a flag in `metaData` describing if samples have low reads or not:**
+
+```{r lib-flag}
+#
+
+```
+
+***
+
+## Plot
+
+It is good to visualize the library size for each sample, grouped by compound ID. This shows us whether samples are well above the threshold, and allows us to inspect the data more carefully.
+
+**Exercise 9: Create a boxplot for the library sizes of each compound (including DMSO) and describe any patterns you identify:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  You can colour your boxplots by concentration to visualize patterns more clearly.
+
+</details>
+
+```{r lib-boxplot}
+#
+
+```
+
+***
+
+# Replicate correlation
+
+## log2CPM
+
+The replicate correlation filter aims to remove any outlying replicates, with maximum pairwise correlations below the `corr_threshold` (set to 0.9). We usually perform this correlation analysis on the log2CPM values to ensure highly expressed genes do not have undue influence on the correlation values. A value of 1 is added to the CPM, to prevent issues arising from the fact that `log2(0)` is `-Inf`. 
+
+**Exercise 10: Calculate and store the log2(CPM + 1) values in a `logcpmData` object:**
+
+```{r log2cpm}
+#
+
+```
+
+***
+
+## Pairwise correlations
+
+In order to calculate pairwise correlations, each sample needs to be compared to the other replicates in its experimental group. We can do this by looping through `mean_ID`.
+
+**Exercise 11: Calculate the pairwise replicate correlations for this data:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  The correlation can be calculated using `cor(cpmDataReps[,j], cpmDataReps[,k])` within an appropriate loop.
+
+</details>
+
+```{r pairwise-corr}
+#
+
+```
+
+***
+
+## Maximum
+
+Each sample is judged by the best pairwise correlation it can achieve. If this is below `corr_threshold`, the sample should be flagged.
+
+**Exercise 12: Calculate the `max_r2` for each sample and add it to the `replicateFilterOutput`:**
+
+```{r max-r2}
+#
+
+```
+
+***
+
+## Plot
+
+**Exercise 13: Visualize the pairwise replicate correlations for each experimental conditions. Describe what you observe:**
+
+```{r corr-boxplot}
+#
+
+```
+
+***
+
+## Flag
+
+**Exercise 14: Flag any samples that did not pass the replicate correlation filter in the `metaData`:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  You can merge the replicate correlation filter output with the metaData to create a `max_r2` column after some processing.
+
+</details>
+
+```{r corr-flag}
+#
+
+```
+
+***
+
+# Advanced questions
+
+If you would like a bit more of a challenge, here are a few extra questions relating to the two sample QC steps above. However, you can also skip these, save your data, and move on to the PCA.
+
+## Library size
+
+**Exercise 14: What are the benefits of a sample having a higher library size and does this benefit apply to some genes more than others?**
+
+```{r read-depth}
+#
+
+```
+
+***
+
+## Replicate correlation
+
+Instead of looking at pairwise correlations, another way of measuring how good a replicate is is by comparing it to the average for that experimental condition. 
+
+**Exercise 15: Calculate replicate correlation in this way and see if it alters the results of this filter. What is one benefit and downside of assessing replicate correlation in this manner?**
+
+```{r mean-corr}
+#
+
+```
+
+***
+
+# Save
+
+**Exercise 16: Remove samples that did not pass the sample QC steps from your data:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  Don't forget to also subset the count and CPM data.
+
+</details>
+
+```{r any-flag}
+#
+
+```
+
+***
+
+## Save
+
+**Exercise 17: Save the updated data:**
+
+```{r save-metadata}
+#
+
+```
+
+***
+
+# Session Info
+
+**Exercise 18: Print your session info at the end of the script, knit the R markdown document, and push it to GitHub:**
+
+```{r session-info}
+#
+
+```
+
+***
+
+That is the end of the Sample QC. Example answers will be available from the `BOO_template` GitHub on Tuesday. 
+
+Next, please move on to the PCA using `04_PCA_Outline.Rmd`.
+
+***
+

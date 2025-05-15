@@ -1,0 +1,600 @@
+---
+title: "BOO 2025 - Example Analysis"
+subtitle: "Script 2: Probe QC - Questions"
+date: "`r Sys.Date()`" 
+author: 
+  Student name
+output:
+  html_document:
+    code_download: true
+    theme: united
+    highlight: tango
+    df_print: paged
+    toc: true
+    number_sections: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+***
+
+> In this script, you will perform probe-level quality control (QC), ensuring that the final data set contains only well-expressed, relevant genes. 
+
+***
+
+# Setup
+
+## Clean
+
+As before, we perform several setup steps at the start of the script to ensure our work is reproducible and clear. 
+
+**Exercise 1: Download the R markdown template and clean your environment.**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  Use the code dropdown menu in the top right corner of this document.
+
+</details>
+
+
+```{r clean}
+#
+
+```
+
+***
+
+## Load packages
+
+Here, we introduce a second package:
+
+* `readxl` allows you to read in Excel files, such as the probe manifest
+
+**Exercise 2: Load `tidyverse` and `readxl` into your R environment**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  You may need to install packages before you load them for the first time with the `install.packages()` function.
+
+</details>
+
+```{r load-packages, warning=F, message=F}
+#
+library(tidyverse)
+library(readxl)
+
+```
+
+***
+
+## Set variables
+
+As before, we set directories and commonly used variables at the start of the script to make it easier to adjust anything later.
+
+**Exercise 3: Create the following objects:**
+
+* `root_dir` - the root directory for your project
+* `count_path` - the location of the count data
+* `metadata_path` - the location of the metadata
+* `manifest path` - the probe manifest for TempO-Seq probes
+
+* `count_store` - where you want to save the count data after QC
+* `cpm_store` - where you want to store the CPM data
+* `metadata_store` - where you want to save the metadata
+* `probedata_store` - where to store the updated manifest
+
+```{r set-variables}
+# This is where the data comes from, thus the input folder
+root_dir <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/"
+count_path <- file.path(root_dir, "input", "countData.txt")
+metadata_path <- file.path(root_dir, "input", "metaData.txt")
+manifest_path <- file.path(root_dir, "input", "Human Whole Transcriptome 2.1 Probe Manifest.xlsx")
+
+# This is were I want to store my output, thus in the output folder
+count_store <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/output/"
+cpm_store <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/output/"
+metadata_store <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/output/"
+probedata_store <- "C:/Users/pienz/Universiteit Leiden/BOO 2025 - BOO CDS Giulia team - BOO CDS Giulia team/Students/Pien/project/pienvanzon_BOO/output/"
+
+```
+
+***
+
+## Load data
+
+For the probe QC, we will use the count data, metadata, and probe manifest.
+
+**Exercise 4: Load required data into the environment:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  The `read_xlsx()` function from the `readxl` package can be used to read in Excel files.
+
+</details>
+
+```{r load-data, warning=F, message=F}
+#
+# This reads the count data
+countData <- read_tsv(count_path)
+
+# This shows al the count data
+str(countData)
+
+#This reads the data from my file
+metaData <- read_tsv(metadata_path)
+
+#This shows the metaDat
+str(metaData)
+
+# The data from the manifest
+manifestData <- read_xlsx(manifest_path)
+
+#This shows the data form the manifest
+str(manifestData)
+
+```
+
+***
+
+# Annotation
+
+## Motivation
+
+In TempO-Seq, each gene is detected using a unique probe sequence. In order to ensure accuracy in our gene annotations and downstream analyses, we need to confirm that these probes align to the locations on the genome that we expect them to.
+
+To do this, we used [NCBI BLAST (Basic Local Alignment Search Tool)](https://blast.ncbi.nlm.nih.gov/Blast.cgi), a tool that allows us to compare the probe sequences against a reference genome database. By uploading our probe sequences to BLAST, we could:
+
+1. Verify that each probe still uniquely matches the gene it was designed for,
+2. Check for any outdated or incorrect annotations, especially since the genome has been updated since the probes were designed, and
+3. Update our manifest file (the reference file we use to link probe names to gene IDs in this script).
+
+**Exercise 5: What problems could arise in your project if you did not update the probe annotations?**
+
+Problems that could arise are that the probes don't match the genes anymore. Another issue could be that some probes match more than one gene.
+
+***
+
+## Update
+
+The manifest provided during this project contains updated information about the probes. 
+
+**Exercise 6: Describe the columns in the probe manifest**
+
+```{r manifest-inspect}
+#
+colnames(manifestData)
+
+```
+
+***
+
+**Exercise 7: Check that we have annotation information for all of the probes in `countData`:**
+
+```{r anno-check}
+# The output of this code is 0, which means that there is no difference in the probes in both datasets.
+missing_annotations <- setdiff(countData$Probe, manifestData$probe_name_old)
+missing_annotations
+
+```
+
+***
+
+Sometimes, the probe sequence could no longer be aligned to a specific gene in the reference genome. In this instance, the `gene_symbol` column will be NA.
+
+**Exercise 8: How many probes could not be aligned in the updated manifest? What should be do with these probes and why?**
+
+```{r not-aligned}
+# This gives the number of probes that are not annotated. These 603 probes can no longer match to genes.Because they have no information, we should remove them from further analysis.
+sum(is.na(manifestData$gene_symbol))
+
+
+```
+
+***
+
+**Exercise 9: How many probes have had their annotation updated by the manifest?**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  The annotation is updated if the old and updated `gene_symbol` do not match.
+
+</details>
+
+```{r update-anno}
+# There are 608 gene annotations that are updated in the manifest. So 608 gene annotations do not match.
+sum(manifestData$gene_symbol != manifestData$gene_symbol_old, na.rm = TRUE)
+
+```
+
+***
+
+**Exercise 10: Create `flag_realignment`, a new column in `probeManifest` which describes whether a probe should be removed, renamed, or kept unchanged:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  Try using `case_when()` inside the `mutate()` function.
+
+</details>
+
+```{r flag-realign}
+#This tells us that we should remove probes which have no annotation, rename probes that have different names for gene and old genes. We should keep the probes of which the gene symbol matches the old gene symbol.
+library(dplyr)
+
+manifestData <- manifestData %>%
+  mutate(flag_realignment = case_when(
+    is.na(gene_symbol) ~ "remove",
+    gene_symbol != gene_symbol_old ~ "rename",
+    gene_symbol == gene_symbol_old ~ "keep"
+  ))
+manifestData
+table(manifestData$flag_realignment)
+```
+
+***
+
+If probes could not be aligned, they should be removed from the `countData`.
+
+**Exercise 11: Subset `countData` to keep only the probes with correct annotations.**
+
+```{r subset-realign}
+# There are 21930 probes that have a correct annotations, and thus stay in the countData.
+valid_probes <- countData$Probe[!is.na(manifestData$gene_symbol)]
+str(valid_probes)
+
+```
+
+***
+
+As well as removing probes that could not be annotated, we also want to update the names of probes where the gene name has changed.
+
+**Exercise 12: Create `probe_name`, a new column in `probeManifest` that contains the updated probe names, and adjust the `countData` row names accordingly:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  The new probe name should be a combination of `gene_symbol` and `probe_ID`.
+
+</details>
+
+```{r}
+table(is.na(manifestData$gene_symbol))
+
+head(rownames(countData_filtered))
+head(manifestData$probe_ID)
+```
+
+
+```{r probe-name}
+# making a new column, probe_name
+manifestData <- manifestData %>%
+  mutate(probe_name = paste0(gene_symbol, "_", probe_ID))
+
+#selecting only the annotated probes
+annotated_manifest <- manifestData %>%
+  filter(!is.na(gene_symbol))
+
+#Also countData must be filtered for only annotated probes
+countData_filtered <- countData[rownames(countData) %in% annotated_manifest$probe_name, ]
+
+#putting manifestData in the same order as countData
+annotated_manifest_ordered <- annotated_manifest[match(rownames(countData_filtered), annotated_manifest$Probe), ]
+
+# check if the data is orderend the same
+stopifnot(all(annotated_manifest_ordered$Probe == rownames(countData_filtered)))
+
+
+countData_filtered
+
+
+
+```
+
+***
+
+It is good practice to check the dimensions of objects when making such adjustments using the `dim()` function. 
+
+**Exercise 13: Check the dimensions of the objects in your environments to ensure nothing went wrong:**
+
+```{r dim-check}
+# The first one is the original data, this has 22533 objects. The second one has 21322 objects. This means that the filtering went correct probably because there are less objects.
+dim(countData)
+dim(countData_filtered)
+
+# The first one is the original data, this has 22533 objects. The second one has 21322 objects. This means that the filtering went correct probably because there are less objects.
+dim(manifestData)
+dim(annotated_manifest)
+
+```
+
+***
+
+# Normalization
+
+## CPM
+
+Counts Per Million (CPM) normalization is a method that accounts for differences in sequencing depth between samples. It scales raw read counts (as in `countData`) so that the total counts per sample sum to one million. This allows for comparison of gene expression levels across samples.
+
+**Exercise 14: Calculate CPM values for our data and store them in a `cpmData` object:**
+
+```{r cpm-norm}
+
+if (!requireNamespace("edgeR", quietly = TRUE)) {
+  install.packages("BiocManager")
+  BiocManager::install("edgeR")
+}
+library(edgeR)
+
+
+
+count_matrix <- as.matrix(countData_filtered)
+count_matrix
+
+cpmData <- edgeR::cpm(count_matrix)
+```
+
+***
+
+# Probe relevance
+
+## Highly expressed genes
+
+By inspecting the most highly expressed genes in a dataset, you can build confidence in the data and get an idea of processes with particular relevance to your project.
+
+**Exercise 15: Add the columns `total_cpm` and `average_cpm` to the probe manifest and describe a few of the most highly expressed genes. Do they make biological sense?**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  You can look up gene functions using [NCBI](https://www.ncbi.nlm.nih.gov/gene/) or [GeneCards](https://www.genecards.org/).
+
+</details>
+
+```{r cpm-summarize}
+#
+total_cpm <- rowSums(cpmData)
+total_cpm
+average_cpm <- rowMeans(cpmData)
+average_cpm
+```
+
+```{r}
+annotated_manifest <- annotated_manifest %>%
+  mutate(
+    total_cpm = total_cpm[match(probe_ID, rownames(cpmData))],
+    average_cpm = average_cpm[match(probe_ID, rownames(cpmData))]
+  )
+
+top_genes <- annotated_manifest %>%
+  arrange(desc(average_cpm)) %>%
+  select(gene_symbol, probe_ID, average_cpm, total_cpm)
+print(top_genes)
+
+```
+
+```{r}
+all(rownames(cpmData) %in% annotated_manifest$Probe)
+```
+
+
+
+***
+
+## Lowly expressed genes
+
+Although these highly expressed genes are interesting and informative, there are also many lowly expressed genes in our data. When genes have very low expression levels, small absolute changes can be represented by very high fold changes. We want to remove these lowly expressed and noisy genes from our data with the relevance filter.
+
+**Exercise 16: Visualize the distribution of log2(average CPM + 1) across your data. Can you identify these lowly expressed genes?**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  Genes with an average CPM below 1 are generally considered to be lowly expressed.
+
+</details>
+
+```{r cpm-plot}
+#
+
+```
+
+***
+
+**Exercise 17: Why did you use a log2 transformation here and why was it necessary to add 1 to the CPM values?**
+
+
+
+***
+
+**Exercise 18: How many probes have no expression measured in any of the samples?**
+
+```{r no-expression}
+#
+
+```
+
+***
+
+## Relevance
+
+We want to keep probes in our data if they are relevant for any of our experiments. Here, we define relevance as having a CPM above 1 for at least two thirds of the replicates. 
+
+**Exercise 19: How many experimental conditions do we have in this data and how many replicates are there for each?**
+
+```{r replicate-number}
+#
+
+```
+
+***
+
+**Exercise 20: Loop through these experimental conditions, calculating for each the percentage of replicates where each probe is above the 1 CPM threshold:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  First create a vector of the experimental conditions to use in a `for()` loop.
+
+</details>
+
+```{r experiment-loop}
+#
+
+```
+
+***
+
+**Exercise 21: Add a column `n_relevant` to the relevance filter output which describes for how many experiments each probe is relevant. Merge the output with the probe manifest:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  The `rowSums()` function may come in handy :)
+
+</details>
+
+```{r count-relevant}
+#
+
+```
+
+***
+
+## Flag
+
+We want to flag the lowly expressed probes in the manifest and remove them from our `countData`. These noisy, unreliable probes should not be included in our downstream analysis.
+
+**Exercise 22: Flag any probes that do not pass the relevance filter for at least one experimental condition and remove them from `countData`:**
+
+```{r flag-relevance}
+#
+
+```
+
+***
+
+**Exercise 23: Visualize and interpret the distribution of `n_relevant`:**
+
+```{r relevant-plot}
+#
+
+```
+
+***
+
+**Exercise 24: Check the distribution of log2(CPM + 1) values coloured by the relevant filter flag. Has the peak of lowly expressed genes been reduced?**
+
+```{r dist-check}
+#
+
+```
+
+***
+
+# Gene-level data
+
+## Sum
+
+Multiple probes from TempO-Seq may interrogate the same gene. Since all of our downstream analyses will be performed at the gene level, we sum probes interrogating the same gene to create gene-level data. 
+
+**Exercise 25: Sum the counts of probes interrogating the same gene and store the gene-level data:**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  Use the `separate` command on the probe names to create a gene name variable easily in the `countData`.
+
+</details>
+
+```{r gene-level}
+#
+
+```
+
+***
+
+**Exercise 26: Re-apply CPM normalization on this gene level data**
+
+```{r reapply-cpm}
+#
+
+```
+
+***
+
+# Advanced questions
+
+If you would like a bit more of a challenge, here are a few extra questions relating to the two probe QC steps above. However, you can also skip these, save your data, and move on to the sample QC.
+
+## Probe realignment
+
+Some of the probes that could not be aligned to the most recent reference genome interrogate genes that are still present in the data. 
+
+**Exercise 27: For genes interrogated by more than 5 probes where at least one of these was removed during realignment, investigate whether the removed probe measured more or fewer counts than the ones remaining in the data.**
+
+<details>
+  <summary><strong>Hint</strong></summary>
+
+  In order to answer these questions at the end of the script (after all the filters), you may want to save a `countData_original` object on loading count data into the environment.
+
+</details>
+
+```{r advanced-realign}
+#
+
+```
+
+***
+
+## Relevance filter
+
+Some probes that were kept in the data had very low average expression levels, but were deemed relevant for one of the experimental conditions.
+
+**Exercise 28: Take a look at the most extreme examples of such probes. What conditions are responsible for them being kept in the data?**
+
+```{r advanced-relevance}
+#
+
+```
+
+***
+
+# Save
+
+**Exercise 29: Save the following objects:**
+
+* `probeManifest` containing information on probes, their expression levels, and the results of the different filters
+* `countData` containing the filtered count data for probes that should be used in downstream analysis
+* `cpmData` containing the CPM normalized counts for relevant, well-expressed probes
+
+```{r save-data}
+#
+
+```
+
+***
+
+# Session Info
+
+**Exercise 30: Print your session info at the end of the script to ensure reproducibility:**
+
+```{r session-info}
+#
+
+```
+
+***
+
+**Exercise 31: Knit this script to produce either a `PDF` or `HTML`file and push it to your GitHub repository.**
+
+That is the end of the Probe QC. Example answers will be available from the `BOO_template` GitHub on Tuesday. 
+
+Next, please move on to the probe QC using `03_SampleQC_Outline.Rmd`.
+
+***
+
