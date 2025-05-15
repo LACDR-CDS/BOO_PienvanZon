@@ -3,7 +3,7 @@ title: "BOO 2025 - Example Analysis"
 subtitle: "Script 1: Data exploration - Questions"
 date: "`r Sys.Date()`" 
 author: 
-  Student name
+  Pien van Zon
 output:
   html_document:
     code_download: true
@@ -47,8 +47,8 @@ It is good practice to clean your environment at the start of every script. That
 </details>
 
 ```{r clean}
-# This gives a character of 0, thus the environment is clear
-ls()
+# This clears the environment.
+rm(list=ls())
 
 ```
 
@@ -103,17 +103,6 @@ metadata_path<- file.path(root_dir, "input", "metaData.txt")
 
 </details>
 
-`countData`
-
-* should contain one column `Probe` containing the probe names
-* the rest of the columns should represent samples with values containing counts for that particular samples
-* this object should have one row for each probe measured by the TempO-Seq
-
-`metaData`
-
-* should have a row for each of the sample columns in `countData`
-* should have variables describing the samples in your data
-
 ```{r load-data}
 # This reads the count data
 countData <- read_tsv(count_path)
@@ -124,9 +113,18 @@ str(countData)
 #This reads the data from my file
 metaData <- read_tsv(metadata_path)
 
-#This shows the metaDat
+#This shows the metaData
 str(metaData)
 ```
+
+countData:
+- contains one column containing probe names
+- The other columns are samples that contain counts of probes that are detected in a sample
+- this has one row for each probe measured by the TempO-Seq
+
+metaData:
+- It should have a row for each of the sample columns in countData
+- It should have variables describing the samples in your data in the columns
 
 ***
 
@@ -137,13 +135,43 @@ The `metaData` object contains information on the individual samples in the data
 **Exercise 6: Briefly describe each of the variables in `metaData`:**
 
 ```{r metadata}
-# This gives the different names of the columns like sample_ID, sample_type,..
+# This gives the different names of the columns
 colnames(metaData)
 
-# This gives the names of what comes under the columns, like the name of the sample, treatment or control, which compound,...
+# This gives the names of what comes under the columns.
 head(metaData)
 
 ```
+- sample_ID is the ID for the sample (same as the column names of the countData).
+- sample_type tells us if the sample is a Treatment or Control sample
+- compound_ID is the ID of the two compounds in this data (CS1119 and CS1131)
+- compound_CAS is the CAS numbers for the two compounds
+- compound_name is the name of the compounds
+- compound_abbr is a shorter name for the compounds (for plots)
+- mean_ID is the group ID composed of the compound_ID, conc_ID, and plate number
+- mean_ID_control is the mean_ID of the control samples that this sample should be compared to
+- control_type is the type of control that should be used (Medium, DMSOLow, or DMSOHigh)
+- conc_ID is the ID of the concentration
+- conc_amt is the amount of concentration
+- conc_unit is the unit of the concentration
+- conc_max is the maximum concentration for this compound
+- conc_min is the minimum concentration for this compound
+- rep is the replicate number
+- lib_size is the library size (total number of reads profiled from this sample)
+- read_depth is the average read depth (library size / number of probes profiled)
+- plate_ID is the plate number
+- plate_well is the location of the sample on the plate
+- plate_row is the row of the plate this sample was on
+- plate_col is the column of the plate this sample was in
+- batch is the batch number
+- timepoint is the number of hours after exposure that expression was profiled
+- cell_type is the cell type (PHH for all samples)
+- compound_class is High or Low toxicity (or NA for controls)
+- LOAEL_amt is the lowest observed adverse effect level (LOAEL)
+- LOAEL_unit is the unit of the LOAEL (mg/kg/d)
+- PBPK_equivalent is the in vitro equivalent of PBPK_serum level (10mg/kg)
+
+
 
 ***
 
@@ -191,6 +219,7 @@ table(metaData$compound_name, metaData$compound_class)
 
 ```
 ```{r}
+# Show distinct combinations of compound and concentration variables
 metaData %>%
   select(compound_name, conc_amt, conc_unit, conc_ID, compound_class) %>%
   distinct()
@@ -242,8 +271,8 @@ metaData_missing
 **Exercise 13: How many hours after exposure are the samples collected?**
 
 ```{r timepoint}
-# The samples are collected after 24 hours.
-unique(metaData$timepoint)
+# The samples are collected after 24 hours of exposure. This is done 60 times.
+table(metaData$timepoint)
 
 ```
 
@@ -252,10 +281,11 @@ unique(metaData$timepoint)
 **Exercise 14: Check that each sample has a unique identifier:**
 
 ```{r unique-id}
-# There are no duplicated, thus every sample ID is unique
-anyDuplicated(metaData$sample_ID)
+# Check if the length of unique sample IDs matches the number of rows in the metadata
+length(unique(metaData$sample_ID)) == nrow(metaData)
 
 ```
+Each sample has a unique identifier, located in the sample_ID column.
 
 ***
 
@@ -275,8 +305,9 @@ Many of the functions we will use in this project assume that `countData` row na
 </details>
 
 ```{r column-rownames}
-# The table already has column and row names.
-
+# The table has column and row names now.
+countData <- countData %>% 
+  column_to_rownames("Probe")
 ```
 
 ***
@@ -290,14 +321,18 @@ Many of the functions we will use in this project assume that `countData` row na
 
 </details>
 
-```{r subset-controls}
-# ??
-unique(metaData$sample_type)
+```{r}
+# Check if the column names in count data are the same as the sample ID's in the meta data set
+table(colnames(countData) %in% metaData$sample_ID)
+```
 
-control_samples <- metaData$sample_ID[metaData$sample_type == "control"]
-control_samples
-countData_control <- countData[, control_samples]
-countData_control
+
+```{r subset-controls}
+# Save a vector of sample IDs for the control samples
+control_IDs <- (metaData %>% filter(sample_type == "Control"))$sample_ID
+
+# Subset the count data for only these control samples (showing only the first 100 rows)
+countData[1:100, control_IDs]
 ```
 
 ***
@@ -312,14 +347,10 @@ countData_control
 </details>
 
 ```{r check-order}
-# Checking if the columns of countData are sample_IDs and if the rows of the metaData are sample_IDs. It turns TRUE, so the sample_IDs are correctly in both sets
-all(colnames(countData) %in% metaData$sample_ID)
-
-# This checks if the data in both sets are the same order. It turns TRUE, so both sets match the sample_IDs in the correct order.
-all(colnames(countData) == metaData$sample_ID) 
-
-
+# check if the column names of the count data are identical to the sample ID column
+table(colnames(countData) == metaData$sample_ID)
 ```
+The order of these columns is correct.
 
 ***
 
@@ -359,6 +390,7 @@ Make sure you save any changed objects at the end of your script for downstream 
 ```{r save-data}
 # 
 save(countData, file=file.path(root_dir, "output/countData_01exploration.RData"))
+save(metaData, file=file.path(root_dir, "output/metaData_01exploration.RData"))
 
 ```
 
