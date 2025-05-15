@@ -3,7 +3,7 @@ title: "BOO 2025 - Example Analysis"
 subtitle: "Script 2: Probe QC - Questions"
 date: "`r Sys.Date()`" 
 author: 
-  Student name
+  Pien van Zon
 output:
   html_document:
     code_download: true
@@ -40,7 +40,8 @@ As before, we perform several setup steps at the start of the script to ensure o
 
 
 ```{r clean}
-#
+# This removes al the earlier stored data in the environment.
+rm(list=ls())
 
 ```
 
@@ -62,7 +63,7 @@ Here, we introduce a second package:
 </details>
 
 ```{r load-packages, warning=F, message=F}
-#
+# These packages are loaded.
 library(tidyverse)
 library(readxl)
 
@@ -118,6 +119,7 @@ For the probe QC, we will use the count data, metadata, and probe manifest.
 
 ```{r load-data, warning=F, message=F}
 #
+library(readr)
 # This reads the count data
 countData <- read_tsv(count_path)
 
@@ -131,10 +133,10 @@ metaData <- read_tsv(metadata_path)
 str(metaData)
 
 # The data from the manifest
-manifestData <- read_xlsx(manifest_path)
+probeManifest <- read_xlsx(manifest_path)
 
 #This shows the data form the manifest
-str(manifestData)
+str(probeManifest)
 
 ```
 
@@ -153,8 +155,7 @@ To do this, we used [NCBI BLAST (Basic Local Alignment Search Tool)](https://bla
 3. Update our manifest file (the reference file we use to link probe names to gene IDs in this script).
 
 **Exercise 5: What problems could arise in your project if you did not update the probe annotations?**
-
-Problems that could arise are that the probes don't match the genes anymore. Another issue could be that some probes match more than one gene.
+We could make incorrect biological interpretations if the probes don't match the genes anymore. And using out of date gene names could mean that they don't map to the latest gene ontologies anymore.
 
 ***
 
@@ -166,20 +167,38 @@ The manifest provided during this project contains updated information about the
 
 ```{r manifest-inspect}
 #
-colnames(manifestData)
+colnames(probeManifest)
 
 ```
+- probe_name_old: This is the name of the old probe, which is a combination of the gene_symbol_old and the probe_ID. This matches the the rownames in the countData
+- probe_ID: this is the ID number assigned to each probe
+- probe_sequence: this is the sequence of nucleotides for each probe
+- probe_coord: this is the location on the genome the probe is designed to match to
+- gene_symbol: this is the updated gene symbol that the probe matches to
+- entrez_id: this is the entrez id of the updated gene
+- ensembl_id: this is the ensembl id of the updates gene
+- hgnc_id: this is the HGNC ID of the updated gene
+- gene_symbol_old: this is the original gene the probe was designed to interrogate
+- entrez_id_old: is the entrez ID of this original gene
+- percentage_match: this is how well the probe sequence matches to the updated gene in the reference genome
 
 ***
 
 **Exercise 7: Check that we have annotation information for all of the probes in `countData`:**
 
+```{r}
+# This code makes the probe column a row.
+countData <- countData %>%column_to_rownames(var = "Probe")
+```
+
+
 ```{r anno-check}
-# The output of this code is 0, which means that there is no difference in the probes in both datasets.
-missing_annotations <- setdiff(countData$Probe, manifestData$probe_name_old)
-missing_annotations
+# We check if the rownames in the countData are in the probeManifest. we have annotations for all 22,533 probes in our data. All the probes in countData are in the probeManifest.
+
+table(rownames(countData) %in% probeManifest$probe_name_old)
 
 ```
+
 
 ***
 
@@ -188,9 +207,9 @@ Sometimes, the probe sequence could no longer be aligned to a specific gene in t
 **Exercise 8: How many probes could not be aligned in the updated manifest? What should be do with these probes and why?**
 
 ```{r not-aligned}
-# This gives the number of probes that are not annotated. These 603 probes can no longer match to genes.Because they have no information, we should remove them from further analysis.
-sum(is.na(manifestData$gene_symbol))
-
+# This gives the number of probes that are not annotated. These 603 probes can no longer match to genes. Because they have no information and thus are not interpretable, we should remove them from further analysis.
+probeManifest %>% 
+  filter(is.na(gene_symbol))
 
 ```
 
@@ -206,8 +225,9 @@ sum(is.na(manifestData$gene_symbol))
 </details>
 
 ```{r update-anno}
-# There are 608 gene annotations that are updated in the manifest. So 608 gene annotations do not match.
-sum(manifestData$gene_symbol != manifestData$gene_symbol_old, na.rm = TRUE)
+# Here we filter the genes that do not match gene symbol old to the new gene symbol from the manifest. There are 608 genes that do not match to the old gene symbol. So 608 genes are updated.
+probeManifest %>% 
+  filter(gene_symbol != gene_symbol_old)
 
 ```
 
@@ -223,17 +243,22 @@ sum(manifestData$gene_symbol != manifestData$gene_symbol_old, na.rm = TRUE)
 </details>
 
 ```{r flag-realign}
-#This tells us that we should remove probes which have no annotation, rename probes that have different names for gene and old genes. We should keep the probes of which the gene symbol matches the old gene symbol.
+#This tells us that we should remove probes which have no annotation, rename probes that have different names for genes and old genes. We should keep the probes of which the gene symbol matches the old gene symbol.
+
 library(dplyr)
 
-manifestData <- manifestData %>%
+probeManifest <- probeManifest %>% 
+  # Create a new variable 'mutate'
   mutate(flag_realignment = case_when(
-    is.na(gene_symbol) ~ "remove",
-    gene_symbol != gene_symbol_old ~ "rename",
-    gene_symbol == gene_symbol_old ~ "keep"
+    # When gene symbol is missing it should be removed
+    is.na(gene_symbol) ~ "Probe removed",
+    # When the old and new gene symbol do not match it should be renamed
+    gene_symbol != gene_symbol_old ~ "Probe renamed",
+    # When the old and new gene symbol are the same it should stay the same
+    gene_symbol == gene_symbol_old ~ "Original probe correct"
   ))
-manifestData
-table(manifestData$flag_realignment)
+
+table(probeManifest$flag_realignment, useNA = "always")
 ```
 
 ***
@@ -243,9 +268,13 @@ If probes could not be aligned, they should be removed from the `countData`.
 **Exercise 11: Subset `countData` to keep only the probes with correct annotations.**
 
 ```{r subset-realign}
-# There are 21930 probes that have a correct annotations, and thus stay in the countData.
-valid_probes <- countData$Probe[!is.na(manifestData$gene_symbol)]
-str(valid_probes)
+# There are 21930 probes that have correct annotations, and thus stay in the count data.
+# This selects the old probe names of all probes that are not removes in the flag realignment colomn.
+kept <- (probeManifest %>% 
+  filter(flag_realignment != "Probe removed"))$probe_name_old
+
+# This filters the rows in count data that match to the probes in the kept data.
+countData <- countData[kept, ]
 
 ```
 
@@ -262,38 +291,23 @@ As well as removing probes that could not be annotated, we also want to update t
 
 </details>
 
-```{r}
-table(is.na(manifestData$gene_symbol))
-
-head(rownames(countData_filtered))
-head(manifestData$probe_ID)
-```
-
-
 ```{r probe-name}
-# making a new column, probe_name
-manifestData <- manifestData %>%
+# This adjusts the count data to the manifest.
+# Create a new variable by combining gene symbol and probe ID
+probeManifest <- probeManifest %>% 
   mutate(probe_name = paste0(gene_symbol, "_", probe_ID))
 
-#selecting only the annotated probes
-annotated_manifest <- manifestData %>%
-  filter(!is.na(gene_symbol))
-
-#Also countData must be filtered for only annotated probes
-countData_filtered <- countData[rownames(countData) %in% annotated_manifest$probe_name, ]
-
-#putting manifestData in the same order as countData
-annotated_manifest_ordered <- annotated_manifest[match(rownames(countData_filtered), annotated_manifest$Probe), ]
-
-# check if the data is orderend the same
-stopifnot(all(annotated_manifest_ordered$Probe == rownames(countData_filtered)))
-
-
-countData_filtered
-
-
-
+countData <- countData %>% 
+  # You put the probes in the row back to the column and rename it 'probe_name_old.
+  rownames_to_column(var="probe_name_old") %>% 
+  # Merge the count data with the probe manifest. There are 2 columns that next to each other with probe names.
+  left_join(y=probeManifest, by="probe_name_old") %>% 
+  # Keep only the probe name and sample ID columns. Now you have a column with the probe names that match the manifest. You only want to have the probe gene column in the count data, because it is updated to the manifest.
+  select(probe_name, all_of(metaData$sample_ID)) %>%
+  # Set row names back again to the updated probe names.
+  column_to_rownames(var="probe_name")
 ```
+
 
 ***
 
@@ -302,14 +316,14 @@ It is good practice to check the dimensions of objects when making such adjustme
 **Exercise 13: Check the dimensions of the objects in your environments to ensure nothing went wrong:**
 
 ```{r dim-check}
-# The first one is the original data, this has 22533 objects. The second one has 21322 objects. This means that the filtering went correct probably because there are less objects.
-dim(countData)
-dim(countData_filtered)
 
-# The first one is the original data, this has 22533 objects. The second one has 21322 objects. This means that the filtering went correct probably because there are less objects.
-dim(manifestData)
-dim(annotated_manifest)
+dim(countData) #21930 probes × 60 samples
 
+dim(probeManifest) #22533 probes × 13 columns
+
+dim(metaData) #60 samples × 29 columns
+
+# The countData and metaData match, they both have 60 samples.The probe manifest has more probes and the countData, this is logical because the count data has been filtered for the none annotated ones.
 ```
 
 ***
@@ -329,14 +343,15 @@ if (!requireNamespace("edgeR", quietly = TRUE)) {
   BiocManager::install("edgeR")
 }
 library(edgeR)
+library(limma)
 
-
-
-count_matrix <- as.matrix(countData_filtered)
-count_matrix
-
-cpmData <- edgeR::cpm(count_matrix)
+# For each column (sample) in count data, multiply the proportion of total counts a value is by 1 million
+cpmData <- data.frame(
+  apply(countData, 2, function(x){x/sum(x)*1E6}))
+cpmData
 ```
+
+
 
 ***
 
@@ -356,32 +371,26 @@ By inspecting the most highly expressed genes in a dataset, you can build confid
 </details>
 
 ```{r cpm-summarize}
-#
-total_cpm <- rowSums(cpmData)
-total_cpm
-average_cpm <- rowMeans(cpmData)
-average_cpm
+# Create a data frame of the total CPM for each probe
+probeManifest <- data.frame(total_cpm = round(rowSums(cpmData), 3)) %>% 
+  # Create a column for the row names
+  rownames_to_column(var="probe_name") %>%
+  # Also calculate the average CPM across samples for that probe
+  mutate(avg_cpm = round(total_cpm / ncol(cpmData), 3)) %>% 
+  # Merge with the current probe manifest
+  right_join(probeManifest, by="probe_name") 
+
+# Show the probes with the highest average CPM
+probeManifest %>% 
+  arrange(desc(avg_cpm)) %>% 
+  head(100)
 ```
-
-```{r}
-annotated_manifest <- annotated_manifest %>%
-  mutate(
-    total_cpm = total_cpm[match(probe_ID, rownames(cpmData))],
-    average_cpm = average_cpm[match(probe_ID, rownames(cpmData))]
-  )
-
-top_genes <- annotated_manifest %>%
-  arrange(desc(average_cpm)) %>%
-  select(gene_symbol, probe_ID, average_cpm, total_cpm)
-print(top_genes)
-
-```
-
-```{r}
-all(rownames(cpmData) %in% annotated_manifest$Probe)
-```
-
-
+The 5 highest expressed genes:
+1. HP:haptoglobin (Hp) gene is actively transcribed in adult but not in fetal liver nuclei.It is expressed in HepG2 cells
+2. HSPB1: (Heat Shock Protein Family B (Small) Member 1) HSPB1 is significantly increased in serum and liver of patients with alcohol-associated hepatitis.
+3. APOA1: (Apolipoprotein A1) is a protein that makes up high-density lipoprotein (HDL), which plays a role in liver cirrhosis and HCC, and can be used as a biomarker. 
+4. ALB:Liver hepatocytes synthesize albumin and rapidly excrete it into the bloodstream at about 10g to 15g per day.
+5. APOC3: APOC3 is expressed in the liver, functions as an inhibitor of lipoprotein lipase (LPL) that hydrolyses triglycerides in VLDL particles and chylomicrons in the plasma. Its absence or over-expression results in hyper- or hypo-triglyceridemia, respectively.  
 
 ***
 
@@ -400,12 +409,29 @@ Although these highly expressed genes are interesting and informative, there are
 
 ```{r cpm-plot}
 #
+probeManifest %>% 
+  # Subset the manifest to include only probes that are kept
+  filter(flag_realignment != "Probe removed") %>% 
+  # Create a new variable with the log2 (CPM + 1) values
+  mutate(log2avg_cpm = log2(avg_cpm+1)) %>% 
+  ggplot() +
+  # Plot these as a histogram
+  geom_histogram(aes(x=log2avg_cpm), fill='pink', color='black', binwidth = 0.2) +
+  # Draw a line at the log2(1+1) value
+  geom_vline(aes(xintercept=1), color='blue', linetype='dashed') +
+  # Label the x axis
+  xlab('log2 of the average CPM (+1) per sample for each probe') +
+  # Use a clean theme
+  theme_bw()
 
 ```
-
+The genes that are lowly expressed are below 1 (blue dashed line), thus the lowly expressed genes are represented by a peak.
 ***
 
 **Exercise 17: Why did you use a log2 transformation here and why was it necessary to add 1 to the CPM values?**
+CPM values can’t go below zero, and many genes have very low expression, so the data is heavily skewed with a big peak near zero and a long tail to the right. Taking the log2 helps spread out the low values and compress the high ones, making the distribution more balanced and easier to work with or visualize.
+
+But since log2(0) is undefined (it gives -Infinity), we add 1 to all CPM values before logging. This way, even genes with zero counts get a defined (log2(1) = 0) value and aren’t excluded from plots or analyses.
 
 
 
@@ -414,8 +440,9 @@ Although these highly expressed genes are interesting and informative, there are
 **Exercise 18: How many probes have no expression measured in any of the samples?**
 
 ```{r no-expression}
-#
-
+# This Show the rows of the probe manifest where total CPM is 0, and thus no measured expression. There are 404 probes with no profiled expression. 
+probeManifest %>% 
+  filter(total_cpm == 0)
 ```
 
 ***
@@ -427,7 +454,13 @@ We want to keep probes in our data if they are relevant for any of our experimen
 **Exercise 19: How many experimental conditions do we have in this data and how many replicates are there for each?**
 
 ```{r replicate-number}
-#
+#There are 17 experimental conditions with 3 replicates for the treated conditions and six for the untreated DMSO and Medium control conditions.
+metaData %>% 
+  group_by(mean_ID) %>% 
+  # Count the number of rows for each mean ID in the metadata
+  summarize(n_reps = n(), .groups = "drop") %>% 
+  # Keep only unique rows
+  distinct()
 
 ```
 
@@ -443,9 +476,43 @@ We want to keep probes in our data if they are relevant for any of our experimen
 </details>
 
 ```{r experiment-loop}
-#
-
+# Create a vector of unique mean IDs
+loop <- unique(metaData$mean_ID)
+loop
 ```
+```{r}
+# Initialize the relevance filter output data frame
+relevanceFilter <- data.frame(probe_name = rownames(cpmData))
+
+# For each unique mean ID
+for(i in loop){
+  # Subset metadata to include only samples with that mean ID
+  set <- metaData %>% 
+    filter(mean_ID == i)
+  
+  # Subset the CPM data to include only those samples
+  cpm.set <- cpmData[ , set$sample_ID]
+  
+  # Count the percentage of values for each probe that are above 1
+  df.set <- data.frame(round(100 * rowSums(cpm.set > 1) / ncol(cpm.set), 2)) %>% 
+    rownames_to_column(var = "probe_name")
+  
+  # Set the column name to the current mean ID
+  colnames(df.set) <- c("probe_name", i)
+  
+  # Merge with the relevance filter output thus far
+  relevanceFilter <- left_join(relevanceFilter, df.set, by="probe_name")
+}
+
+# Make the probe name column into the row names
+relevanceFilter <- relevanceFilter %>% 
+  column_to_rownames(var="probe_name")
+
+# Show the first 6 rows of the output
+head(relevanceFilter)
+```
+
+
 
 ***
 
@@ -459,7 +526,19 @@ We want to keep probes in our data if they are relevant for any of our experimen
 </details>
 
 ```{r count-relevant}
-#
+relevanceFilter <- relevanceFilter %>% 
+  # Create a variable counting the number of rows with a value above 66
+  mutate(n_relevant = rowSums(relevanceFilter >= 66)) %>% 
+  # Move this column to the first place in the data frame
+  select(n_relevant, everything()) %>% 
+  # Convert row names to a new column called probe_name
+  rownames_to_column(var="probe_name")
+
+# Merge with the manifest using this new column
+probeManifest <- left_join(probeManifest, relevanceFilter, by="probe_name")
+
+# Summarize the number of relevant experiments for each probe
+summary(probeManifest$n_relevant)
 
 ```
 
@@ -472,28 +551,89 @@ We want to flag the lowly expressed probes in the manifest and remove them from 
 **Exercise 22: Flag any probes that do not pass the relevance filter for at least one experimental condition and remove them from `countData`:**
 
 ```{r flag-relevance}
-#
+# A probe is relevant if it passes the threshold for at least 1 experimental condition. So 7089 probes are not relevant, 14841 are relevant and 603 have no information.
+probeManifest <- probeManifest %>% 
+  mutate(flag_relevant = ifelse(n_relevant >= 1, T, F))
+
+# Tabulate the relevance flag
+table(probeManifest$flag_relevant, useNA="always")
 
 ```
+```{r}
+# Make a vector of probes that pass the filter
+kept <- (probeManifest %>% 
+  filter(flag_relevant == T))$probe_name
+
+# Check the dimensions of the count data
+dim(countData)
+```
+```{r}
+# Subset the count data
+countData <- countData[kept, ]
+
+# Check dimensions again following the subset
+dim(countData)
+```
+7,089 probes did not pass the relevance filter and these were removed from countData, leaving 14,841 reliable and well-expressed probes.
+
 
 ***
 
 **Exercise 23: Visualize and interpret the distribution of `n_relevant`:**
 
 ```{r relevant-plot}
-#
+probeManifest %>% 
+  # Keep only probes that could be aligned
+  filter(flag_realignment != "Probe removed") %>% 
+  ggplot() +
+  # Plot a histogram of the number of experiments a probe is relevant for
+  geom_histogram(aes(x = n_relevant,
+                     fill = flag_relevant),
+                 color = "grey20",
+                 binwidth = 1) +
+  # Set axis labels and title
+  xlab(paste0("N conditions where a probe reaches 1 CPM in at least 66% reps")) +
+  ylab("N probes") + ggtitle("Relevance distribution") + 
+  # Use a clean theme
+  theme_bw() +
+  # Remove the legend
+  theme(legend.position = "none")
 
 ```
+For almost half of the probes measured (N = 11,280) they pass the relevance threshold for all 17 experimental conditions. The distribution is bimodal, with most probes being expressed either in all or none of the conditions.
+
+
+```{r}
+# Show probes that are relevant for all conditions
+probeManifest %>% 
+  filter(n_relevant == max(n_relevant, na.rm=T))
+```
+
 
 ***
 
 **Exercise 24: Check the distribution of log2(CPM + 1) values coloured by the relevant filter flag. Has the peak of lowly expressed genes been reduced?**
 
 ```{r dist-check}
-#
+probeManifest %>% 
+  # Keep only aligned probes
+  filter(flag_realignment != "Probe removed") %>% 
+  # Create a variable containing the log2 (CPM + 1) values
+  mutate(log2avg_cpm = log2(avg_cpm + 1)) %>% 
+  ggplot() +
+  # Plot this as a histogram, coloured by relevance 
+  geom_histogram(aes(x = log2avg_cpm, fill = flag_relevant), 
+                 color = "black", binwidth = 0.2) +
+  # Set the x-axis label and title
+  xlab("log2 of the average CPM (+1) per sample for each probe") +
+  ggtitle("Distribution of log2 (CPM + 1) values coloured by relevance") +
+  # Use a clean theme
+  theme_bw() +
+  # Do not show the legend
+  theme(legend.position='none')
 
 ```
-
+Yes, the lowly expressed peak we saw before (the peak below 0) has been removed by the relevance filter.
 ***
 
 # Gene-level data
@@ -512,7 +652,21 @@ Multiple probes from TempO-Seq may interrogate the same gene. Since all of our d
 </details>
 
 ```{r gene-level}
-#
+countData <- countData %>% 
+  # Create a column of row (probe) names
+  rownames_to_column(var = "probe_name") %>%  
+  # The part of the probe name before the underscore should be stored as gene_symbol
+  separate(probe_name, 
+           into=c("gene_symbol", NA), 
+           sep = "_") %>% 
+  # Group the count data by gene symbol
+  group_by(gene_symbol) %>% 
+  # Add the row values for each group
+  summarise(across(where(is.numeric), sum), .groups = "drop") %>% 
+  # Move the gene symbols to the row names
+  column_to_rownames(var = "gene_symbol")
+
+countData[1:10, ]
 
 ```
 
@@ -521,7 +675,11 @@ Multiple probes from TempO-Seq may interrogate the same gene. Since all of our d
 **Exercise 26: Re-apply CPM normalization on this gene level data**
 
 ```{r reapply-cpm}
-#
+cpmData <- data.frame(
+  # For each row, multiply the proportion each value represents by 1 million
+  apply(countData, 2, function(x){x/sum(x)*1E6}))
+
+cpmData[1:10, ]
 
 ```
 
@@ -574,6 +732,9 @@ Some probes that were kept in the data had very low average expression levels, b
 
 ```{r save-data}
 #
+save(countData, file=file.path(root_dir, "output/countData_02_probeQC.RData"))
+save(metaData, file=file.path(root_dir, "output/metaData_02_probeQC.RData"))
+save(cpmData, file=file.path(root_dir, "output/cpmData_02_probeQC.RData"))
 
 ```
 
